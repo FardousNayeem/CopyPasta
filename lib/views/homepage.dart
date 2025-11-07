@@ -127,8 +127,8 @@ class _HomePageState extends State<HomePage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             SizedBox(
-              width: 120,
-              height: 55,
+              width: 75,
+              height: 50,
               child: FloatingActionButton.extended(
                 onPressed: () {
 
@@ -140,8 +140,8 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 10),
             SizedBox(
-              width: 120,
-              height: 55,
+              width: 75,
+              height: 50,
               child: FloatingActionButton.extended(
                 onPressed: () {
 
@@ -153,8 +153,8 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 10),
             SizedBox(
-              width: 120,
-              height: 55,
+              width: 75,
+              height: 50,
               child: FloatingActionButton.extended(
                 onPressed: () {},
                 label: const Text('Recieve'),
@@ -201,8 +201,8 @@ class _HomePageState extends State<HomePage> {
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           SizedBox(
-            width: 120,
-            height: 55,
+            width: 75,
+            height: 50,
             child: FloatingActionButton.extended(
               onPressed: toggleOverlay,
               heroTag: "share",

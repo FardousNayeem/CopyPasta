@@ -1,26 +1,28 @@
 name: copypasta
-description: "A new Flutter project."
+description: "Syncronized clipboard and notes."
 publish_to: 'none'
 version: 0.1.0
 
 environment:
-  sdk: '>=3.3.1 <4.0.0'
+  sdk: ^3.8.1
 
 dependencies:
   flutter:
     sdk: flutter
-  connectivity: any
   google_fonts: any
-  intl: any
-  shared_preferences: any
   url_launcher: any
   multicast_dns: any
-  flutter_local_notifications: any
+  shared_preferences: any
+  intl: any
+  http: any
+  uuid: any
+  shelf: ^1.4.1
+  shelf_router: ^1.1.4
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
+  flutter_lints: ^5.0.0
 
 flutter:
   uses-material-design: true
