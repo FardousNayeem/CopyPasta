@@ -10,6 +10,11 @@ import 'package:copypasta/views/edit_note.dart';
 import 'package:copypasta/views/add_link.dart';
 import 'package:copypasta/templates/tile.dart';
 
+import 'package:copypasta/network/local_server.dart';
+import 'package:copypasta/network/mdns_service.dart';
+import 'package:copypasta/sync/sync_service.dart';
+import 'package:copypasta/network/peer_api.dart';
+
 class HomePage extends StatefulWidget {
   const HomePage({Key? key});
 
@@ -18,19 +23,20 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final GlobalKey<OverlayState> overlayKey = GlobalKey<OverlayState>();
   List<Map<String, dynamic>> items = [];
   OverlayEntry? overlayEntry;
   bool isOverlayVisible = false;
   bool isRefreshed = false;
-
-  // For sync connection simulation (for later WLAN feature)
   bool isConnected = false;
+  String? localIp;
+
+  final LocalServer _server = LocalServer();
+  final SyncService _sync = SyncService();
+  final MdnsService _mdns = MdnsService();
 
   @override
   void initState() {
     super.initState();
-    items = [];
     constRefresh();
   }
 
@@ -39,36 +45,23 @@ class _HomePageState extends State<HomePage> {
     final notesData = prefs.getStringList('notes');
     final linksData = prefs.getStringList('links');
 
-    setState(() {
-      items.clear();
-    });
+    setState(() => items.clear());
 
     if (notesData != null) {
-      setState(() {
-        items.addAll(notesData
-            .map((note) => json.decode(note))
-            .cast<Map<String, dynamic>>()
-            .toList());
-      });
+      items.addAll(notesData.map((note) => json.decode(note)).cast<Map<String, dynamic>>());
     }
 
     if (linksData != null) {
-      setState(() {
-        items.addAll(linksData
-            .map((link) => json.decode(link))
-            .cast<Map<String, dynamic>>()
-            .toList());
-      });
+      items.addAll(linksData.map((link) => json.decode(link)).cast<Map<String, dynamic>>());
     }
+
     sortItems();
   }
 
   void sortItems() {
     items.sort((a, b) {
-      DateTime timeA =
-          DateFormat('hh:mm:ss a dd-MM-yyyy').parse(a['createdAt']);
-      DateTime timeB =
-          DateFormat('hh:mm:ss a dd-MM-yyyy').parse(b['createdAt']);
+      DateTime timeA = DateFormat('hh:mm:ss a dd-MM-yyyy').parse(a['createdAt']);
+      DateTime timeB = DateFormat('hh:mm:ss a dd-MM-yyyy').parse(b['createdAt']);
       return timeB.compareTo(timeA);
     });
   }
@@ -93,13 +86,9 @@ class _HomePageState extends State<HomePage> {
   void refreshData() {
     if (!isRefreshed) {
       getItems();
-      setState(() {
-        isRefreshed = true;
-      });
+      setState(() => isRefreshed = true);
       Future.delayed(const Duration(seconds: 1), () {
-        setState(() {
-          isRefreshed = false;
-        });
+        setState(() => isRefreshed = false);
       });
     }
   }
@@ -111,15 +100,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> launchURL(Uri url) async {
-    if (!await launchUrl(
-      url,
-      mode: LaunchMode.externalApplication,
-    )) {
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
       throw Exception('Could not launch $url');
     }
   }
 
-  // ---------- Overlay Logic ----------
   void toggleOverlay() {
     if (isOverlayVisible) {
       overlayEntry?.remove();
@@ -137,23 +122,31 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Connect button
+            // Connect
             SizedBox(
               width: 120,
               height: 55,
               child: FloatingActionButton.extended(
                 onPressed: () async {
-                  // Placeholder: simulate connect toggle
-                  setState(() => isConnected = !isConnected);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        isConnected
-                            ? 'Connected to device successfully'
-                            : 'Disconnected',
-                      ),
-                    ),
-                  );
+                  if (!_server.isRunning) {
+                    await _server.start();
+                    setState(() {
+                      isConnected = true;
+                      localIp = _server.ip;
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Hosting CopyPasta at ${_server.ip}:${_server.port}')),
+                    );
+                  } else {
+                    await _server.stop();
+                    setState(() {
+                      isConnected = false;
+                      localIp = null;
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Server stopped')),
+                    );
+                  }
                 },
                 label: Text(isConnected ? 'Disconnect' : 'Connect'),
                 icon: const Icon(Icons.route),
@@ -161,26 +154,66 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             const SizedBox(height: 10),
-            // Sync button
+
+            // Sync
             SizedBox(
               width: 120,
               height: 55,
               child: FloatingActionButton.extended(
-                onPressed: () {
+                onPressed: () async {
                   if (!isConnected) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Please connect first!'),
-                      ),
+                      const SnackBar(content: Text('Start server or connect first!')),
                     );
                     return;
                   }
+
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Syncing data between devices...'),
+                    const SnackBar(content: Text('Searching for CopyPasta peers...')),
+                  );
+
+                  final peers = await _mdns.discoverPeers();
+                  final verifiedPeers = <String>[];
+                  for (final ip in peers) {
+                    final peer = PeerAPI(ip);
+                    if (await peer.check()) verifiedPeers.add(ip);
+                  }
+
+                  if (verifiedPeers.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('No CopyPasta peers found.')),
+                    );
+                    return;
+                  }
+
+                  await showDialog(
+                    context: context,
+                    builder: (_) => AlertDialog(
+                      title: const Text('Select a CopyPasta Peer'),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: verifiedPeers
+                            .map((p) => ListTile(
+                                  title: Text(p),
+                                  onTap: () async {
+                                    Navigator.pop(context);
+                                    try {
+                                      await _sync.syncWith(p);
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Synced successfully with $p!')),
+                                      );
+                                      refreshData();
+                                    } catch (e) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Sync failed: $e')),
+                                      );
+                                    }
+                                  },
+                                ))
+                            .toList(),
+                      ),
                     ),
                   );
-                  // Placeholder for WLAN sync logic later
                 },
                 label: const Text('Sync'),
                 icon: const Icon(Icons.sync),
@@ -195,7 +228,6 @@ class _HomePageState extends State<HomePage> {
     isOverlayVisible = true;
   }
 
-  // ---------- UI ----------
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).colorScheme;
@@ -204,28 +236,50 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         backgroundColor: theme.primaryContainer,
         centerTitle: true,
-        title: Text(
-          'CopyPasta',
-          style: TextStyle(
-            color: theme.onPrimaryContainer,
-            fontWeight: FontWeight.w600,
-            fontSize: 25,
-          ),
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              'CopyPasta',
+              style: TextStyle(
+                color: theme.onPrimaryContainer,
+                fontWeight: FontWeight.w600,
+                fontSize: 25,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Icon(
+              Icons.circle,
+              color: isConnected ? Colors.greenAccent.shade400 : Colors.grey.shade500,
+              size: 14,
+            ),
+          ],
         ),
+        bottom: localIp != null
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(18),
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    'Connected: $localIp',
+                    style: TextStyle(
+                      color: theme.onPrimaryContainer.withOpacity(0.8),
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              )
+            : null,
         actions: [
           IconButton(
             onPressed: refreshData,
-            icon: const Icon(
-              Icons.refresh_rounded,
-              size: 30,
-            ),
+            icon: const Icon(Icons.refresh_rounded, size: 30),
           ),
           const SizedBox(width: 15),
         ],
         actionsIconTheme: IconThemeData(color: theme.onPrimaryContainer),
       ),
 
-      //Bottom FAB Row
       floatingActionButton: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
@@ -271,7 +325,6 @@ class _HomePageState extends State<HomePage> {
       floatingActionButtonLocation: FloatingActionButtonLocation.endContained,
       bottomNavigationBar: const BottomAppBar(child: Row()),
 
-      // Items list
       body: Padding(
         padding: const EdgeInsets.all(8),
         child: ListView.builder(
@@ -319,9 +372,7 @@ class _HomePageState extends State<HomePage> {
                             'Are you sure you want to delete this ${item.containsKey('details') ? 'note' : 'link'}?'),
                         actions: <Widget>[
                           TextButton(
-                            onPressed: () {
-                              Navigator.of(context).pop();
-                            },
+                            onPressed: () => Navigator.of(context).pop(),
                             child: const Text('Cancel'),
                           ),
                           TextButton(
