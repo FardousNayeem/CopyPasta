@@ -95,7 +95,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // 🔧 FIXED: Prevent infinite loop with 0-second timer
   void constRefresh() {
     Timer.periodic(const Duration(seconds: 3), (Timer timer) {
       refreshData();
@@ -126,7 +125,7 @@ class _HomePageState extends State<HomePage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             SizedBox(
-              width: 75,
+              width: 100,
               height: 50,
               child: FloatingActionButton.extended(
                 onPressed: () {},
@@ -137,26 +136,16 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 10),
             SizedBox(
-              width: 75,
+              width: 100,
               height: 50,
               child: FloatingActionButton.extended(
                 onPressed: () {},
-                label: const Text('Send'),
+                label: const Text('Sync'),
                 icon: const Icon(Icons.send),
-                heroTag: "send",
+                heroTag: "sync",
               ),
             ),
             const SizedBox(height: 10),
-            SizedBox(
-              width: 75,
-              height: 50,
-              child: FloatingActionButton.extended(
-                onPressed: () {},
-                label: const Text('Receive'),
-                icon: const Icon(Icons.download),
-                heroTag: "receive",
-              ),
-            ),
           ],
         ),
       ),

@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:uuid/uuid.dart';
 import 'package:copypasta/templates/title.dart';
 
 class AddLink extends StatefulWidget {
@@ -18,7 +18,9 @@ class _AddLinkState extends State<AddLink> {
   Future<void> addLink(BuildContext context) async {
     final formattedDate = DateFormat('hh:mm:ss a dd-MM-yyyy').format(DateTime.now());
       
+    final uuid = Uuid();
     final Map<String, dynamic> link = {
+      'id': uuid.v4(),
       'title': titleController.text,
       'createdAt': formattedDate,
     };
