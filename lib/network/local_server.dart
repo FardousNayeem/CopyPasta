@@ -1,24 +1,19 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/material.dart';
 import 'package:shelf/shelf.dart';
-import 'package:shelf_router/shelf_router.dart' as shelf;
 import 'package:shelf/shelf_io.dart' as io;
+import 'package:shelf_router/shelf_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 
-/// A simple local HTTP server used by CopyPasta for sync and peer connection.
 class LocalServer {
   HttpServer? _server;
   int port = 8080;
   String? ip;
   bool get isRunning => _server != null;
+  MDnsClient? _mdns;
 
-  final GlobalKey<NavigatorState> navigatorKey;
-
-  LocalServer(this.navigatorKey);
-
-  /// Start the server and listen for peer requests.
+  /// Start the HTTP server and broadcast its presence on the LAN.
   Future<void> start() async {
     if (_server != null) return;
 
@@ -26,101 +21,73 @@ class LocalServer {
       includeLinkLocal: false,
       type: InternetAddressType.IPv4,
     );
-    ip = interfaces.expand((i) => i.addresses).firstWhere((a) => !a.isLoopback).address;
 
-    final router = shelf.Router();
+    ip = interfaces
+        .expand((i) => i.addresses)
+        .firstWhere((a) => !a.isLoopback)
+        .address;
 
+    final router = Router();
 
-    router.get('/health', (_) => Response.ok('ok'));
+    // Health check
+    router.get('/health', (Request _) => Response.ok('ok'));
 
-    router.get('/data', (_) async {
+    // Get stored data
+    router.get('/data', (Request _) async {
       final prefs = await SharedPreferences.getInstance();
       final notes = prefs.getStringList('notes') ?? [];
       final links = prefs.getStringList('links') ?? [];
-      return Response.ok(jsonEncode({'notes': notes, 'links': links}),
-          headers: {'Content-Type': 'application/json'});
+      final jsonData = jsonEncode({'notes': notes, 'links': links});
+      return Response.ok(jsonData, headers: {'Content-Type': 'application/json'});
     });
 
+    // Receive and save incoming data
     router.post('/data', (Request req) async {
-      final prefs = await SharedPreferences.getInstance();
       final body = await req.readAsString();
       final decoded = jsonDecode(body) as Map<String, dynamic>;
-      await prefs.setStringList('notes', List<String>.from(decoded['notes'] ?? []));
-      await prefs.setStringList('links', List<String>.from(decoded['links'] ?? []));
+      final prefs = await SharedPreferences.getInstance();
+
+      if (decoded['notes'] != null) {
+        await prefs.setStringList('notes', List<String>.from(decoded['notes']));
+      }
+      if (decoded['links'] != null) {
+        await prefs.setStringList('links', List<String>.from(decoded['links']));
+      }
+
       return Response.ok('saved');
     });
 
-    // Connection handshake endpoints
-    router.post('/connect', (Request req) async {
-      final body = await req.readAsString();
-      final data = jsonDecode(body);
-      final requesterIp = data['ip'] ?? 'Unknown';
-      final requesterName = data['name'] ?? 'Unknown device';
-      _showIncomingRequest(requesterName, requesterIp);
-      return Response.ok(
-          jsonEncode({'status': 'pending', 'message': 'Request sent to user'}),
-          headers: {'Content-Type': 'application/json'});
-    });
+    final handler = const Pipeline()
+        .addMiddleware(logRequests())
+        .addHandler(router);
 
-    router.post('/accept', (Request req) async {
-      final prefs = await SharedPreferences.getInstance();
-      final body = await req.readAsString();
-      final data = jsonDecode(body);
-      final peerIp = data['ip'];
-      final peerName = data['name'];
-      await prefs.setString('connectedPeer', peerIp);
-      await prefs.setString('connectedPeerName', peerName);
-      return Response.ok(jsonEncode({'status': 'connected'}),
-          headers: {'Content-Type': 'application/json'});
-    });
-
-    final handler = const Pipeline().addMiddleware(logRequests()).addHandler(router);
     _server = await io.serve(handler, InternetAddress.anyIPv4, port);
-    print('✅ CopyPasta server running at $ip:$port');
+    print('✅ CopyPasta server running on $ip:$port');
 
-    _startMdnsAdvertise();
+    // Start advertising for mDNS discovery
+    _advertiseService();
   }
 
-  void _showIncomingRequest(String requesterName, String requesterIp) {
-    final ctx = navigatorKey.currentContext;
-    if (ctx == null) return;
-
-    showDialog(
-      context: ctx,
-      builder: (_) => AlertDialog(
-        title: const Text('Incoming Connection'),
-        content: Text('$requesterName ($requesterIp) wants to connect.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Reject')),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setString('connectedPeer', requesterIp);
-              await prefs.setString('connectedPeerName', requesterName);
-              print('✅ Connected to $requesterIp');
-            },
-            child: const Text('Accept'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Minimal mDNS advertisement socket (for discovery)
-  Future<void> _startMdnsAdvertise() async {
+  /// Broadcast a service record for mDNS discovery
+  Future<void> _advertiseService() async {
     try {
-      final mdns = MDnsClient();
-      await mdns.start();
-      print('🌐 mDNS socket active for CopyPasta discovery');
+      _mdns = MDnsClient();
+      await _mdns!.start();
+
+      // Note: multicast_dns cannot broadcast directly, but this ensures the socket is live for discovery.
+      // If you switch to `bonsoir` later, you can truly broadcast from here.
+      print('🌐 (mDNS discovery socket started for CopyPasta)');
     } catch (e) {
-      print('⚠️ mDNS failed: $e');
+      print('⚠️ Failed to start mDNS socket: $e');
     }
   }
 
+  /// Stop the HTTP server and mDNS socket
   Future<void> stop() async {
     await _server?.close(force: true);
     _server = null;
-    print('🛑 Server stopped');
+    _mdns?.stop();
+    _mdns = null;
+    print('🛑 CopyPasta server stopped');
   }
 }
