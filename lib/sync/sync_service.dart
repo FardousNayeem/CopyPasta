@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:copypasta/network/peer_api.dart';
 
 class SyncService {
@@ -8,6 +9,12 @@ class SyncService {
     final notes = prefs.getStringList('notes') ?? [];
     final links = prefs.getStringList('links') ?? [];
     return {'notes': notes, 'links': links};
+  }
+
+  Future<void> _saveData(Map<String, dynamic> data) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('notes', List<String>.from(data['notes']));
+    await prefs.setStringList('links', List<String>.from(data['links']));
   }
 
   /// Merges both device data, removing duplicates and marking synced entries
@@ -20,6 +27,7 @@ class SyncService {
 
     List<String> allNotes = {...localNotes, ...remoteNotes}.toList();
     List<String> allLinks = {...localLinks, ...remoteLinks}.toList();
+
 
     allNotes = allNotes.map((e) {
       final note = jsonDecode(e);
