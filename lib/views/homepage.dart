@@ -4,11 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
-import 'package:multicast_dns/multicast_dns.dart';
 
 import 'package:copypasta/views/add_note.dart';
-import 'package:copypasta/views/edit_note.dart';
 import 'package:copypasta/views/add_link.dart';
+import 'package:copypasta/views/note_view.dart';
 import 'package:copypasta/templates/tile.dart';
 
 class HomePage extends StatefulWidget {
@@ -25,11 +24,10 @@ class _HomePageState extends State<HomePage> {
   bool isOverlayVisible = false;
   bool isRefreshed = false;
 
-
   @override
   void initState() {
     super.initState();
-    items = [];
+    getItems();
     constRefresh();
   }
 
@@ -37,22 +35,23 @@ class _HomePageState extends State<HomePage> {
     final prefs = await SharedPreferences.getInstance();
     final notesData = prefs.getStringList('notes');
     final linksData = prefs.getStringList('links');
-    
+
     setState(() {
       items.clear();
     });
 
     if (notesData != null) {
       setState(() {
-        items.addAll(notesData.map((note) => json.decode(note)).cast<Map<String, dynamic>>().toList());
+        items.addAll(notesData.map((note) => json.decode(note)).cast<Map<String, dynamic>>());
       });
     }
 
     if (linksData != null) {
       setState(() {
-        items.addAll(linksData.map((link) => json.decode(link)).cast<Map<String, dynamic>>().toList());
+        items.addAll(linksData.map((link) => json.decode(link)).cast<Map<String, dynamic>>());
       });
     }
+
     sortItems();
   }
 
@@ -78,6 +77,7 @@ class _HomePageState extends State<HomePage> {
       linksData.remove(jsonEncode(itemToDelete));
       await prefs.setStringList('links', linksData);
     }
+
     refreshData();
   }
 
@@ -95,16 +95,15 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // 🔧 FIXED: Prevent infinite loop with 0-second timer
   void constRefresh() {
-    Timer.periodic(const Duration(seconds: 0), (Timer timer) {
+    Timer.periodic(const Duration(seconds: 3), (Timer timer) {
       refreshData();
     });
   }
 
   Future<void> launchURL(Uri url) async {
-    if (!await launchUrl(
-      url, mode: LaunchMode.externalApplication,)
-    ) {
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
       throw Exception('Could not launch $url');
     }
   }
@@ -122,7 +121,7 @@ class _HomePageState extends State<HomePage> {
     overlayEntry = OverlayEntry(
       builder: (context) => Positioned(
         bottom: 90,
-        left: 12, 
+        left: 12,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -130,9 +129,7 @@ class _HomePageState extends State<HomePage> {
               width: 75,
               height: 50,
               child: FloatingActionButton.extended(
-                onPressed: () {
-
-                },
+                onPressed: () {},
                 label: const Text('Connect'),
                 icon: const Icon(Icons.route),
                 heroTag: "connect",
@@ -143,9 +140,7 @@ class _HomePageState extends State<HomePage> {
               width: 75,
               height: 50,
               child: FloatingActionButton.extended(
-                onPressed: () {
-
-                },
+                onPressed: () {},
                 label: const Text('Send'),
                 icon: const Icon(Icons.send),
                 heroTag: "send",
@@ -157,9 +152,9 @@ class _HomePageState extends State<HomePage> {
               height: 50,
               child: FloatingActionButton.extended(
                 onPressed: () {},
-                label: const Text('Recieve'),
+                label: const Text('Receive'),
                 icon: const Icon(Icons.download),
-                heroTag: "recieve",
+                heroTag: "receive",
               ),
             ),
           ],
@@ -173,6 +168,7 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).colorScheme;
+
     return Scaffold(
       backgroundColor: theme.background,
       appBar: AppBar(
@@ -189,39 +185,21 @@ class _HomePageState extends State<HomePage> {
         actions: [
           IconButton(
             onPressed: refreshData,
-            icon: const Icon(Icons.refresh_rounded, size: 30,),
+            icon: const Icon(Icons.refresh_rounded, size: 30),
           ),
           const SizedBox(width: 15),
         ],
         actionsIconTheme: IconThemeData(color: theme.onPrimaryContainer),
       ),
-  
-      //Bottom Nav Bar
+
       floatingActionButton: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          SizedBox(
-            width: 75,
-            height: 50,
-            child: FloatingActionButton.extended(
-              onPressed: toggleOverlay,
-              heroTag: "share",
-              label: const Text('Share', style: TextStyle(fontSize: 16)),
-              icon: const Icon(Icons.share),
-              elevation: 0,
-            ),
-          ),
-          const SizedBox(width: 7),
           FloatingActionButton.extended(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const AddLink()),
-              );
-            },
-            heroTag: "addLink",
-            label: const Text('Add Link', style: TextStyle(fontSize: 15)),
-            icon: const Icon(Icons.link),
+            onPressed: toggleOverlay,
+            heroTag: "share",
+            label: const Text('Sync', style: TextStyle(fontSize: 16)),
+            icon: const Icon(Icons.share),
             elevation: 0,
           ),
           const SizedBox(width: 7),
@@ -237,12 +215,24 @@ class _HomePageState extends State<HomePage> {
             icon: const Icon(Icons.note_add),
             elevation: 0,
           ),
+          const SizedBox(width: 7),
+          FloatingActionButton.extended(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const AddLink()),
+              );
+            },
+            heroTag: "addLink",
+            label: const Text('Add Link', style: TextStyle(fontSize: 15)),
+            icon: const Icon(Icons.link),
+            elevation: 0,
+          ),
         ],
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endContained,
-      bottomNavigationBar: const BottomAppBar(
-        child: Row(),
-      ),
+      bottomNavigationBar: const BottomAppBar(child: Row()),
+
       body: Padding(
         padding: const EdgeInsets.all(8),
         child: ListView.builder(
@@ -259,14 +249,13 @@ class _HomePageState extends State<HomePage> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => EditNote(
+                        builder: (context) => NoteView(
                           note: item,
                           noteIndex: index,
                         ),
                       ),
                     );
                   } else {
-                    //final Uri urlL = Uri(scheme: 'https', host: item['title'], path: '/');
                     final uriParts = Uri.parse(item['title']);
                     final scheme = uriParts.scheme;
                     final host = uriParts.host;
@@ -284,8 +273,11 @@ class _HomePageState extends State<HomePage> {
                     context: context,
                     builder: (BuildContext context) {
                       return AlertDialog(
-                        title: Text(item.containsKey('details') ? 'Delete Note' : 'Delete Link'),
-                        content: Text('Are you sure you want to delete this ${item.containsKey('details') ? 'note' : 'link'}?'),
+                        title: Text(item.containsKey('details')
+                            ? 'Delete Note'
+                            : 'Delete Link'),
+                        content: Text(
+                            'Are you sure you want to delete this ${item.containsKey('details') ? 'note' : 'link'}?'),
                         actions: <Widget>[
                           TextButton(
                             onPressed: () {

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 import 'package:copypasta/templates/title.dart';
 import 'package:copypasta/templates/details.dart';
@@ -20,11 +21,14 @@ class _AddNoteState extends State<AddNote> {
   Future<void> addNote(BuildContext context) async {
     final formattedDate = DateFormat('hh:mm:ss a dd-MM-yyyy').format(DateTime.now());
       
+    final uuid = Uuid();
     final Map<String, dynamic> note = {
+      'id': uuid.v4(),
       'title': titleController.text,
       'details': detailsController.text,
       'createdAt': formattedDate,
     };
+
 
     final prefs = await SharedPreferences.getInstance();
     final notesData = prefs.getStringList('notes') ?? [];
