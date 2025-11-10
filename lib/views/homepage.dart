@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 
+import 'package:copypasta/views/connect.dart';
 import 'package:copypasta/views/add_note.dart';
 import 'package:copypasta/views/add_link.dart';
 import 'package:copypasta/views/note_view.dart';
@@ -23,6 +24,7 @@ class _HomePageState extends State<HomePage> {
   OverlayEntry? overlayEntry;
   bool isOverlayVisible = false;
   bool isRefreshed = false;
+  bool isConnected = false;
 
   @override
   void initState() {
@@ -117,42 +119,71 @@ class _HomePageState extends State<HomePage> {
   }
 
   void showOverlay() {
-    overlayEntry = OverlayEntry(
-      builder: (context) => Positioned(
-        bottom: 90,
-        left: 12,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 100,
-              height: 50,
-              child: FloatingActionButton.extended(
-                onPressed: () {},
-                label: const Text('Connect'),
-                icon: const Icon(Icons.route),
-                heroTag: "connect",
+  overlayEntry = OverlayEntry(
+    builder: (context) => Positioned(
+      bottom: 90,
+      left: 12,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 🟩 CONNECT BUTTON
+          SizedBox(
+            width: 120,
+            height: 50,
+            child: FloatingActionButton.extended(
+              heroTag: "connect",
+              backgroundColor:
+                  isConnected ? Colors.green : Theme.of(context).primaryColor,
+              onPressed: () async {
+                // Close overlay before navigation
+                overlayEntry?.remove();
+                isOverlayVisible = false;
+
+                // Go to ConnectPage
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const ConnectPage()),
+                );
+
+                // If user connected successfully
+                if (mounted && result == true) {
+                  setState(() {
+                    isConnected = true;
+                  });
+                }
+              },
+              label: Text(
+                isConnected ? 'Connected' : 'Connect',
+                style: const TextStyle(fontSize: 16),
+              ),
+              icon: Icon(
+                isConnected ? Icons.check_circle : Icons.route,
+                color: Colors.white,
               ),
             ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: 100,
-              height: 50,
-              child: FloatingActionButton.extended(
-                onPressed: () {},
-                label: const Text('Sync'),
-                icon: const Icon(Icons.send),
-                heroTag: "sync",
-              ),
+          ),
+          const SizedBox(height: 10),
+
+          // 🟦 SYNC BUTTON
+          SizedBox(
+            width: 120,
+            height: 50,
+            child: FloatingActionButton.extended(
+              onPressed: () {},
+              label: const Text('Sync', style: TextStyle(fontSize: 16)),
+              icon: const Icon(Icons.sync),
+              heroTag: "sync",
             ),
-            const SizedBox(height: 10),
-          ],
-        ),
+          ),
+          const SizedBox(height: 10),
+        ],
       ),
-    );
-    Overlay.of(context)!.insert(overlayEntry!);
-    isOverlayVisible = true;
-  }
+    ),
+  );
+  Overlay.of(context)!.insert(overlayEntry!);
+  isOverlayVisible = true;
+}
+
 
   @override
   Widget build(BuildContext context) {
