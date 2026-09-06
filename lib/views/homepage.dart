@@ -1,400 +1,344 @@
-import 'dart:convert';
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:intl/intl.dart';
 
-import 'package:copypasta/views/add_note.dart';
-import 'package:copypasta/views/edit_note.dart';
-import 'package:copypasta/views/add_link.dart';
+import 'package:copypasta/models/pasta_item.dart';
+import 'package:copypasta/services/item_store.dart';
+import 'package:copypasta/services/lan_service.dart';
 import 'package:copypasta/templates/tile.dart';
-
-import 'package:copypasta/network/local_server.dart';
-import 'package:copypasta/network/mdns_service.dart';
-import 'package:copypasta/sync/sync_service.dart';
-import 'package:copypasta/network/peer_api.dart';
+import 'package:copypasta/views/add_item.dart';
+import 'package:copypasta/views/connect.dart';
+import 'package:copypasta/views/note_view.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({Key? key}) : super(key: key);
+  const HomePage({super.key});
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
-  List<Map<String, dynamic>> items = [];
-  OverlayEntry? overlayEntry;
-  bool isOverlayVisible = false;
-  bool isRefreshed = false;
-  bool isConnected = false;
-  String? localIp;
-  String? connectedPeer;
-  String? connectedPeerName;
+  final _store = ItemStore.instance;
+  final _lan = LanService.instance;
+  final _searchController = TextEditingController();
 
-  late LocalServer _server;
-  final MdnsService _mdns = MdnsService();
-  final SyncService _sync = SyncService();
-  final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+  String _query = '';
+  bool _searching = false;
 
   @override
-  void initState() {
-    super.initState();
-    _server = LocalServer(navigatorKey);
-    _loadConnection();
-    constRefresh();
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
-  Future<void> _loadConnection() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      connectedPeer = prefs.getString('connectedPeer');
-      connectedPeerName = prefs.getString('connectedPeerName');
-    });
+  List<PastaItem> _filtered() {
+    final all = _store.visibleItems;
+    if (_query.isEmpty) return all;
+    final needle = _query.toLowerCase();
+    return all
+        .where((i) =>
+            i.title.toLowerCase().contains(needle) ||
+            i.body.toLowerCase().contains(needle))
+        .toList();
   }
 
-  Future<void> getItems() async {
-    final prefs = await SharedPreferences.getInstance();
-    final notesData = prefs.getStringList('notes');
-    final linksData = prefs.getStringList('links');
-    setState(() => items.clear());
+  // ------------------------------------------------------------------ actions
 
-    if (notesData != null) {
-      items.addAll(notesData.map((e) => jsonDecode(e)).cast<Map<String, dynamic>>());
-    }
-    if (linksData != null) {
-      items.addAll(linksData.map((e) => jsonDecode(e)).cast<Map<String, dynamic>>());
-    }
-
-    sortItems();
+  Future<void> _copy(PastaItem item) async {
+    await Clipboard.setData(ClipboardData(text: item.copyPayload));
+    if (!mounted) return;
+    _toast('Copied to clipboard');
   }
 
-  void sortItems() {
-    items.sort((a, b) {
-      final aTime = DateFormat('hh:mm:ss a dd-MM-yyyy').parse(a['createdAt']);
-      final bTime = DateFormat('hh:mm:ss a dd-MM-yyyy').parse(b['createdAt']);
-      return bTime.compareTo(aTime);
-    });
+  void _toast(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(message),
+        duration: const Duration(milliseconds: 1600),
+      ));
   }
 
-  void constRefresh() {
-    Timer.periodic(const Duration(seconds: 0), (_) => getItems());
-  }
-
-  Future<void> launchURL(Uri url) async {
-    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-      throw Exception('Could not launch $url');
-    }
-  }
-
-  void toggleOverlay() {
-    if (isOverlayVisible) {
-      overlayEntry?.remove();
-      isOverlayVisible = false;
-    } else {
-      showOverlay();
-    }
-  }
-
-  Future<void> deleteItem(int index) async {
-    final prefs = await SharedPreferences.getInstance();
-    final List<String> notesData = prefs.getStringList('notes') ?? [];
-    final List<String> linksData = prefs.getStringList('links') ?? [];
-
-    // Item selected from the merged UI list
-    final Map<String, dynamic> itemToDelete = items[index];
-
-    // Try remove from notes (exact JSON match)
-    final encoded = jsonEncode(itemToDelete);
-    if (notesData.contains(encoded)) {
-      notesData.remove(encoded);
-      await prefs.setStringList('notes', notesData);
-    }
-    // Otherwise try remove from links
-    else if (linksData.contains(encoded)) {
-      linksData.remove(encoded);
-      await prefs.setStringList('links', linksData);
-    } else {
-      // Fallback: match by createdAt + title (handles slight JSON key-order differences)
-      final createdAt = itemToDelete['createdAt'] as String?;
-      final title = itemToDelete['title'] as String?;
-
-      // notes fallback
-      final nIdx = notesData.indexWhere((s) {
-        final m = jsonDecode(s) as Map<String, dynamic>;
-        return m['createdAt'] == createdAt && m['title'] == title;
-      });
-      if (nIdx != -1) {
-        notesData.removeAt(nIdx);
-        await prefs.setStringList('notes', notesData);
-      } else {
-        // links fallback
-        final lIdx = linksData.indexWhere((s) {
-          final m = jsonDecode(s) as Map<String, dynamic>;
-          return m['createdAt'] == createdAt && m['title'] == title;
-        });
-        if (lIdx != -1) {
-          linksData.removeAt(lIdx);
-          await prefs.setStringList('links', linksData);
-        }
-      }
+  Future<void> _open(PastaItem item) async {
+    if (!item.isLink) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => NoteView(itemId: item.id)),
+      );
+      return;
     }
 
-    // Refresh merged list in UI
-    await getItems();
+    // Parse the whole thing. The previous version rebuilt the URL from scheme,
+    // host and path alone, which silently dropped every query string and
+    // fragment, so a link like `youtube.com/watch?v=...` opened the wrong page.
+    final raw = item.title.trim();
+    final uri = Uri.tryParse(raw.contains('://') ? raw : 'https://$raw');
+    if (uri == null || uri.host.isEmpty) {
+      _toast('That does not look like a link');
+      return;
+    }
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) _toast('No app could open that link');
+    } catch (_) {
+      if (mounted) _toast('Could not open that link');
+    }
   }
 
-
-  void showOverlay() {
-    overlayEntry = OverlayEntry(
-      builder: (context) => Positioned(
-        bottom: 90,
-        left: 12,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 120,
-              height: 55,
-              child: FloatingActionButton.extended(
-                label: Text(isConnected ? 'Disconnect' : 'Connect'),
-                icon: const Icon(Icons.route),
-                heroTag: "connect",
-                onPressed: () async {
-                  if (!_server.isRunning) {
-                    await _server.start();
-                    setState(() {
-                      isConnected = true;
-                      localIp = _server.ip;
-                    });
-
-                    final peers = await _mdns.discoverPeers();
-                    if (peers.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('No peers found.')),
-                      );
-                      return;
-                    }
-
-                    await showDialog(
-                      context: context,
-                      builder: (_) => AlertDialog(
-                        title: const Text('Select a CopyPasta Peer'),
-                        content: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: peers.map((p) {
-                            return ListTile(
-                              title: Text(p),
-                              onTap: () async {
-                                Navigator.pop(context);
-                                try {
-                                  final peer = PeerAPI(p);
-                                  await peer.sendData({
-                                    'ip': localIp,
-                                    'name': 'CopyPasta Device',
-                                  });
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Request sent to $p')),
-                                  );
-                                } catch (e) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Connect failed: $e')),
-                                  );
-                                }
-                              },
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    );
-                  } else {
-                    await _server.stop();
-                    setState(() {
-                      isConnected = false;
-                      localIp = null;
-                    });
-                  }
-                },
-              ),
+  Future<void> _confirmDelete(PastaItem item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(item.isLink ? 'Delete link' : 'Delete note'),
+        content: Text('"${item.title}" will be removed from this device and '
+            'from any device you sync with next.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+              foregroundColor: Theme.of(dialogContext).colorScheme.onError,
             ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: 120,
-              height: 55,
-              child: FloatingActionButton.extended(
-                label: const Text('Sync'),
-                icon: const Icon(Icons.sync),
-                heroTag: "sync",
-                onPressed: () async {
-                  if (connectedPeer == null) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('No connected peer yet!')),
-                    );
-                    return;
-                  }
-                  try {
-                    await _sync.syncWith(connectedPeer!);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Synced with $connectedPeerName')),
-                    );
-                    getItems();
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Sync failed: $e')),
-                    );
-                  }
-                },
-              ),
-            ),
-          ],
-        ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
       ),
     );
-    Overlay.of(context)!.insert(overlayEntry!);
-    isOverlayVisible = true;
+    if (confirmed != true) return;
+    await _store.delete(item.id);
+    if (mounted) _toast('Deleted');
   }
+
+  Future<void> _addItem(PastaKind kind) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => AddItemPage(kind: kind)),
+    );
+  }
+
+  // --------------------------------------------------------------------- UI
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).colorScheme;
-    return MaterialApp(
-      navigatorKey: navigatorKey,
-      home: Scaffold(
-        backgroundColor: theme.background,
-        appBar: AppBar(
-          backgroundColor: theme.primaryContainer,
-          centerTitle: true,
-          title: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text('CopyPasta',
-                      style: TextStyle(
-                          color: theme.onPrimaryContainer,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 25)),
-                  const SizedBox(width: 10),
-                  Icon(Icons.circle,
-                      color: isConnected
-                          ? Colors.greenAccent.shade400
-                          : Colors.grey.shade500,
-                      size: 14),
-                ],
-              ),
-              if (connectedPeerName != null)
-                Text('Connected to $connectedPeerName',
-                    style: TextStyle(
-                        color: theme.onPrimaryContainer.withOpacity(0.8),
-                        fontSize: 14)),
-              if (localIp != null)
-                Text('Local IP: $localIp',
-                    style: TextStyle(
-                        color: theme.onPrimaryContainer.withOpacity(0.6),
-                        fontSize: 13)),
-            ],
+    final scheme = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: _searching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Search notes and links',
+                  filled: false,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                ),
+                onChanged: (value) => setState(() => _query = value.trim()),
+              )
+            : const Text('CopyPasta'),
+        actions: [
+          IconButton(
+            tooltip: _searching ? 'Close search' : 'Search',
+            icon: Icon(_searching ? Icons.close_rounded : Icons.search_rounded),
+            onPressed: () => setState(() {
+              _searching = !_searching;
+              if (!_searching) {
+                _searchController.clear();
+                _query = '';
+              }
+            }),
           ),
-          actions: [
-            IconButton(
-              onPressed: getItems,
-              icon: const Icon(Icons.refresh_rounded, size: 30),
-            ),
-            const SizedBox(width: 15),
-          ],
-          actionsIconTheme: IconThemeData(color: theme.onPrimaryContainer),
-        ),
-        floatingActionButton: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            SizedBox(
-              width: 90,
-              height: 50,
-              child: FloatingActionButton.extended(
-                onPressed: toggleOverlay,
-                heroTag: "share",
-                label: const Text('Sync', style: TextStyle(fontSize: 16)),
-                icon: const Icon(Icons.sync_alt),
-                elevation: 0,
-              ),
-            ),
-            const SizedBox(width: 7),
-            FloatingActionButton.extended(
-              onPressed: () {
-                Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const AddNote()));
-              },
-              heroTag: "addNote",
-              label: const Text('Add Note', style: TextStyle(fontSize: 15)),
-              icon: const Icon(Icons.note_add),
-              elevation: 0,
-            ),
-            const SizedBox(width: 7),
-            FloatingActionButton.extended(
-              onPressed: () {
-                Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const AddLink()));
-              },
-              heroTag: "addLink",
-              label: const Text('Add Link', style: TextStyle(fontSize: 15)),
-              icon: const Icon(Icons.link),
-              elevation: 0,
-            ),
-          ],
-        ),
-        floatingActionButtonLocation: FloatingActionButtonLocation.endContained,
-        body: Padding(
-          padding: const EdgeInsets.all(8),
-          child: ListView.builder(
+          const SizedBox(width: 4),
+        ],
+      ),
+
+      body: ListenableBuilder(
+        listenable: _store,
+        builder: (context, _) {
+          if (!_store.isLoaded) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final items = _filtered();
+          if (items.isEmpty) {
+            return _EmptyState(
+              searching: _query.isNotEmpty,
+              onAddNote: () => _addItem(PastaKind.note),
+            );
+          }
+          return ListView.separated(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 120),
             itemCount: items.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 8),
             itemBuilder: (context, index) {
               final item = items[index];
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Tile(
-                  title: item['title'],
-                  date: item['createdAt'],
-                  onTap: () {
-                    if (item.containsKey('details')) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) =>
-                                EditNote(note: item, noteIndex: index)),
-                      );
-                    } else {
-                      final uri = Uri.parse(item['title']);
-                      final scheme = uri.scheme.isNotEmpty ? uri.scheme : 'https';
-                      final host = uri.host.isNotEmpty ? uri.host : uri.path;
-                      final path = uri.host.isNotEmpty ? uri.path : '/';
-                      launchURL(Uri(scheme: scheme, host: host, path: path));
-                    }
-                  },
-                  onLongPress: () {
-                    showDialog(
-                      context: context,
-                      builder: (_) => AlertDialog(
-                        title: Text(item.containsKey('details')
-                            ? 'Delete Note'
-                            : 'Delete Link'),
-                        content: Text('Delete this item?'),
-                        actions: [
-                          TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('Cancel')),
-                          TextButton(
-                              onPressed: () {
-                                deleteItem(index);
-                                Navigator.pop(context);
-                              },
-                              child: const Text('Delete')),
-                        ],
-                      ),
-                    );
-                  },
-                ),
+              return Tile(
+                item: item,
+                onTap: () => _open(item),
+                onCopy: () => _copy(item),
+                onLongPress: () => _confirmDelete(item),
               );
             },
+          );
+        },
+      ),
+
+      bottomNavigationBar: BottomAppBar(
+        height: 68,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(
+          children: [
+            ListenableBuilder(
+              listenable: _lan,
+              builder: (context, _) => _ConnectionChip(
+                status: _lan.status,
+                peerCount: _lan.peers.length,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ConnectPage()),
+                ),
+              ),
+            ),
+            const Spacer(),
+          ],
+        ),
+      ),
+
+      floatingActionButtonLocation: FloatingActionButtonLocation.endContained,
+      floatingActionButton: MenuAnchor(
+        style: MenuStyle(
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           ),
+        ),
+        menuChildren: [
+          MenuItemButton(
+            leadingIcon: const Icon(Icons.notes_rounded),
+            onPressed: () => _addItem(PastaKind.note),
+            child: const Text('Note'),
+          ),
+          MenuItemButton(
+            leadingIcon: const Icon(Icons.link_rounded),
+            onPressed: () => _addItem(PastaKind.link),
+            child: const Text('Link'),
+          ),
+        ],
+        builder: (context, controller, _) => FloatingActionButton.extended(
+          heroTag: 'add',
+          backgroundColor: scheme.primaryContainer,
+          foregroundColor: scheme.onPrimaryContainer,
+          onPressed: () =>
+              controller.isOpen ? controller.close() : controller.open(),
+          icon: const Icon(Icons.add_rounded),
+          label: const Text('Add'),
+        ),
+      ),
+    );
+  }
+}
+
+/// The one place the app reports whether other devices can reach it.
+class _ConnectionChip extends StatelessWidget {
+  final ServerStatus status;
+  final int peerCount;
+  final VoidCallback onTap;
+
+  const _ConnectionChip({
+    required this.status,
+    required this.peerCount,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    late final IconData icon;
+    late final String label;
+    late final Color color;
+
+    switch (status) {
+      case ServerStatus.running:
+        icon = Icons.wifi_tethering_rounded;
+        label = peerCount == 0
+            ? 'Sharing'
+            : 'Sharing  $peerCount ${peerCount == 1 ? 'device' : 'devices'}';
+        color = scheme.primary;
+      case ServerStatus.starting:
+        icon = Icons.wifi_tethering_rounded;
+        label = 'Starting';
+        color = scheme.onSurfaceVariant;
+      case ServerStatus.failed:
+        icon = Icons.wifi_tethering_error_rounded;
+        label = 'Sharing failed';
+        color = scheme.error;
+      case ServerStatus.stopped:
+        icon = Icons.wifi_tethering_off_rounded;
+        label = 'Sharing off';
+        color = scheme.onSurfaceVariant;
+    }
+
+    return TextButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 20, color: color),
+      label: Text(label, style: TextStyle(color: color)),
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  final bool searching;
+  final VoidCallback onAddNote;
+
+  const _EmptyState({required this.searching, required this.onAddNote});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context).textTheme;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              searching ? Icons.search_off_rounded : Icons.content_paste_rounded,
+              size: 44,
+              color: scheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              searching ? 'No matches' : 'Nothing saved yet',
+              style: theme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              searching
+                  ? 'Try a shorter search.'
+                  : 'Save a note or a link here, then open it from your other '
+                      'device over Wi-Fi.',
+              textAlign: TextAlign.center,
+              style: theme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+            if (!searching) ...[
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: onAddNote,
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Add a note'),
+              ),
+            ],
+          ],
         ),
       ),
     );

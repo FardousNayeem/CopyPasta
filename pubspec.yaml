@@ -1,28 +1,71 @@
 name: copypasta
-description: "Syncronized clipboard and notes."
+description: "Notes, links and files you save on one device and reach from another over Wi-Fi."
 publish_to: 'none'
 version: 0.1.0
 
 environment:
   sdk: ^3.8.1
 
+# Constraints are pinned to a major version rather than `any`. With `any`, a
+# breaking release of any of these would be picked up on the next `pub get` and
+# the build would break without a single line of this project changing.
 dependencies:
   flutter:
     sdk: flutter
-  google_fonts: any
-  url_launcher: any
-  multicast_dns: any
-  shared_preferences: any
-  intl: any
-  http: any
-  uuid: any
-  shelf: ^1.4.1
+  crypto: ^3.0.7
+  file_picker: ^12.2.0
+  # Keeps the process alive on Android so the LAN server survives the app going
+  # to the background. Android only; the desktops never kill us.
+  flutter_foreground_task: ^11.0.2
+  http: ^1.5.0
+  intl: ^0.20.2
+  open_filex: ^4.7.0
+  path_provider: ^2.1.6
+  shared_preferences: ^2.5.3
+  shelf: ^1.4.2
   shelf_router: ^1.1.4
+  url_launcher: ^6.3.2
+  uuid: ^4.5.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^5.0.0
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true
+
+  assets:
+    # Bundled so the licences can be registered with Flutter's own licence
+    # registry and shown by showLicensePage, which is what the SIL Open Font
+    # License asks for when a font ships inside an application.
+    - assets/fonts/OFL-Mukta.txt
+    - assets/fonts/OFL-JetBrainsMono.txt
+
+  # Fonts are bundled rather than fetched at runtime by google_fonts. This app
+  # is for a network that often has no route to the internet, and a font that
+  # silently falls back to the system face on first launch is exactly the kind
+  # of "works on my machine" that only shows up on someone else's.
+  #
+  # Both faces are subset to Latin, punctuation, currency, arrows and maths,
+  # which took them from 1.9 MB to 568 KB. Mukta's Devanagari is dropped: the
+  # interface is English, and the platform font already covers every script
+  # Mukta does not. To regenerate, see the pyftsubset line in README.md.
+  fonts:
+    - family: Mukta
+      fonts:
+        - asset: assets/fonts/Mukta-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Mukta-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Mukta-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Mukta-Bold.ttf
+          weight: 700
+    # A variable font with a 100-800 weight axis in a single file. Weight is
+    # selected through FontVariation in AppTheme.mono rather than by declaring
+    # separate faces, so the axis is driven directly instead of leaving Flutter
+    # to synthesise a fake bold.
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono.ttf

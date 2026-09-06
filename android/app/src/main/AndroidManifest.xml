@@ -1,8 +1,45 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Sharing over the LAN needs all four. Only the debug and profile
+         manifests declared any of them, so a release build had no network
+         access whatsoever and the Connect screen could never work. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+    <!-- Lets the Wi-Fi stack hand us broadcast and multicast packets, which is
+         what UDP device discovery rides on. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
+
+    <!-- Keeps the LAN server alive while the app is in the background.
+         FOREGROUND_SERVICE_DATA_SYNC is required from Android 14 for a service
+         declared with the dataSync type; the plugin itself only declares the
+         generic FOREGROUND_SERVICE, WAKE_LOCK and POST_NOTIFICATIONS. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+
+    <!-- Removed from the merged manifest. open_filex declares these so it can
+         open files out of shared media storage; every file this app opens is
+         in its own private directory, where its `pathRequiresPermission` check
+         returns false and the permission branch is never reached. Asking for
+         access to the user's whole photo and music library to open a file we
+         wrote ourselves is not a trade worth making. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
+
+    <!-- flutter_foreground_task declares this for its boot receiver. Nothing
+         here runs on boot: autoRunOnBoot is false, and a sharing server that
+         started itself after a reboot would be a surprise, not a feature. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove"/>
+
     <application
-        android:label="copypasta"
+        android:label="CopyPasta"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -25,6 +62,14 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Serving files and notes to other devices is a data sync, and
+             Android 14 refuses to start a foreground service that does not say
+             which type it is. -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

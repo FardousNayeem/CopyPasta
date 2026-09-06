@@ -18,8 +18,12 @@ pluginManagement {
 
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
-    id("com.android.application") version "8.7.3" apply false
-    id("org.jetbrains.kotlin.android") version "2.1.0" apply false
+    // 8.9.1 is the floor: androidx.core 1.18, pulled in by the file picker and
+    // the foreground service, refuses anything older. 8.11.1 is what Flutter
+    // currently wants, and the wrapper's Gradle 8.14 satisfies it.
+    id("com.android.application") version "8.11.1" apply false
+    // Flutter warns that support for Kotlin below 2.2.20 is being dropped.
+    id("org.jetbrains.kotlin.android") version "2.2.20" apply false
 }
 
 include(":app")
